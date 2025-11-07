@@ -1,0 +1,31 @@
+Тести (Потрібен файл test.jpg в тій самій папці, де ви запускаєте curl)
+
+1. Тест PUT (Завантажуємо test.jpg в кеш як 100.jpg)
+Має повернути 201 (Created)
+
+curl.exe -X PUT --data-binary "@test.jpg" http://localhost:8000/100
+
+2. Тест GET (Отримуємо 100.jpg з кешу)
+Має повернути 200 (OK) і зберегти картинку як new_100.jpg
+
+curl.exe http://localhost:8000/100 -o new_100.jpg
+
+3. Тест DELETE (Видаляємо 100.jpg з кешу)
+Має повернути 200 (OK)
+
+curl.exe -X DELETE http://localhost:8000/100
+
+4. Тест GET (Пробуємо отримати видалений 100.jpg)
+Має повернути 404 (Not Found)
+
+curl.exe -v http://localhost:8000/100
+
+5. Тест іншого методу (наприклад, POST)
+Має повернути 405 (Method not allowed)
+
+curl.exe -v -X POST http://localhost:8000/100
+
+6. Тест неправильного URL
+Має повернути 400 (Bad Request)
+
+curl.exe -v http://localhost:8000/hello

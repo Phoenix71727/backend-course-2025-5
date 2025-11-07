@@ -1,38 +1,128 @@
 //імпорт модулів
-const http = require('http'); 
-const fs = require('fs'); 
-const path = require('path'); 
-const { program } = require('commander'); 
+const { program } = require('commander');
+const http = require('http');
+const fs = require('fs').promises;
+const path = require('path');
 
 // аргументи командного рядка
 program
-  .requiredOption('-h, --host <type>', 'Адреса сервера')
-  .requiredOption('-p, --port <type>', 'Порт сервера')
-  .requiredOption('-c, --cache <type>', 'Шлях до папки кешу')
-  .parse(process.argv); 
+  .requiredOption('-h, --host <host>', 'адреса сервера')
+  .requiredOption('-p, --port <port>', 'порт сервера')
+  .requiredOption('-c, --cache <path>', 'шлях до директорії кешу');
+
+program.parse();
 
 const options = program.opts();
-const host = options.host;
-const port = parseInt(options.port, 10);
-const cacheDir = path.resolve(options.cache); //повний шлях до папки кешу
 
 // створення папки кешу, якщо її не існує
-if (!fs.existsSync(cacheDir)) {
-  console.log(`Створюю папку кешу за шляхом: ${cacheDir}`);
-  fs.mkdirSync(cacheDir, { recursive: true });
+async function ensureCacheDirectory() {
+  try {
+    await fs.access(options.cache);
+  } catch (error) {
+    await fs.mkdir(options.cache, { recursive: true });
+    console.log(`Створюю папку кешу за шляхом: ${options.cache}`);
+  }
+}
+// отримання шляху
+function getCacheFilePath(httpCode) {
+  return path.join(options.cache, `${httpCode}.jpg`);
 }
 
+// обробка запитів
+// GET
+async function handleGet(httpCode, res) {
+  try {
+    const filePath = getCacheFilePath(httpCode);
+    const imageData = await fs.readFile(filePath);
+    
+    res.writeHead(200, { 'Content-Type': 'image/jpeg' });
+    res.end(imageData);
+    console.log(`GET ${httpCode} - успішно отримано з кешу`);
+  } catch (error) {
+    res.writeHead(404, { 'Content-Type': 'text/plain; charset=utf-8' });
+    res.end('Not Found\n');
+    console.log(`GET ${httpCode} - не знайдено в кеші`);
+  }
+}
+// PUT
+async function handlePut(httpCode, req, res) {
+  try {
+    const chunks = [];
+    
+    for await (const chunk of req) {
+      chunks.push(chunk);
+    }
+    
+    const imageData = Buffer.concat(chunks);
+    const filePath = getCacheFilePath(httpCode);
+    
+    await fs.writeFile(filePath, imageData);
+    
+    res.writeHead(201, { 'Content-Type': 'text/plain; charset=utf-8' });
+    res.end('Created\n');
+    console.log(`PUT ${httpCode} - збережено в кеш`);
+  } catch (error) {
+    res.writeHead(500, { 'Content-Type': 'text/plain; charset=utf-8' });
+    res.end('Internal Server Error\n');
+    console.error(`PUT ${httpCode} - помилка:`, error);
+  }
+}
+// DELETE
+async function handleDelete(httpCode, res) {
+  try {
+    const filePath = getCacheFilePath(httpCode);
+    await fs.unlink(filePath);
+    
+    res.writeHead(200, { 'Content-Type': 'text/plain; charset=utf-8' });
+    res.end('OK\n');
+    console.log(`DELETE ${httpCode} - видалено з кешу`);
+  } catch (error) {
+    res.writeHead(404, { 'Content-Type': 'text/plain; charset=utf-8' });
+    res.end('Not Found\n');
+    console.log(`DELETE ${httpCode} - не знайдено в кеші`);
+  }
+}
 // створення веб-сервера
-const server = http.createServer((req, res) => {
-  // в майбутньому
-  console.log(`Отримано запит: ${req.method} ${req.url}`);
-  res.statusCode = 501;
-  res.setHeader('Content-Type', 'text/plain; charset=utf-8');
-  res.end('Логіка проксі-сервера ще не реалізована.');
+const server = http.createServer(async (req, res) => {
+  const httpCode = req.url.slice(1);
+  // чек правильності URL
+  if (!httpCode || !/^\d{3}$/.test(httpCode)) {
+    res.writeHead(400, { 'Content-Type': 'text/plain; charset=utf-8' });
+    res.end('Bad Request: Invalid HTTP code. Use format: /200, /404, etc.\n');
+    return;
+  }
+  // обробка методів
+  switch (req.method) {
+    case 'GET':
+      await handleGet(httpCode, res);
+      break;
+      
+    case 'PUT':
+      await handlePut(httpCode, req, res);
+      break;
+      
+    case 'DELETE':
+      await handleDelete(httpCode, res);
+      break;
+      
+    default:
+      res.writeHead(405, { 'Content-Type': 'text/plain; charset=utf-8' });
+      res.end('Method Not Allowed\n');
+      console.log(`${req.method} ${httpCode} - метод не дозволено`);
+  }
 });
 
-// запуск
-server.listen(port, host, () => {
-  console.log(`Проксі-сервер запущено за адресою http://${host}:${port}`);
-  console.log(`Кеш зберігається у папці: ${cacheDir}`);
+// запуск сервера (функція)
+async function startServer() {
+  await ensureCacheDirectory();
+
+  server.listen(options.port, options.host, () => {
+    console.log(`Проксі-сервер запущено за адресою http://${options.host}:${options.port}`);
+    console.log(`Кеш зберігається у папці: ${options.cache}`);
+  });
+}
+// запуск сервера
+startServer().catch(error => {
+  console.error('Помилка запуску сервера:', error);
+  process.exit(1);
 });
